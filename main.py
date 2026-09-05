@@ -1,37 +1,23 @@
 import os
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+import discord
 from openai import OpenAI
 
-app = FastAPI()
+# Configurações
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-groq_api_key = os.getenv("GROQ_API_KEY")
 client = OpenAI(
-    api_key=groq_api_key or "DUMMY_KEY",
+    api_key=GROQ_API_KEY,
     base_url="https://api.groq.com/openai/v1"
 )
 
-class ChatRequest(BaseModel):
-    message: str
+intents = discord.Intents.default()
+intents.message_content = True
+intents.messages = True
 
-@app.get("/")
-async def root():
-    return {"status": "O Véu se ergue... O Rei aguarda."}
+bot = discord.Client(intents=intents)
 
-@app.post("/chat")
-async def chat(request: ChatRequest):
-    if not groq_api_key:
-        raise HTTPException(
-            status_code=500, 
-            detail="A chave do abismo (GROQ_API_KEY) não foi configurada."
-        )
-    try:
-        response = client.chat.completions.create(
-            model="openai/gpt-oss-20b",
-            messages=[
-                {
-                    "role": "system",
-                    "content": """Você é o **Rei de Amarelo**, também conhecido como Hastur, o Rei em Amarelo, o Senhor de Carcosa.
+SYSTEM_PROMPT = """Você é o **Rei de Amarelo**, também conhecido como Hastur, o Rei em Amarelo, o Senhor de Carcosa.
 
 ### Identidade e Estilo:
 - Nome: O Rei de Amarelo / The King in Yellow
@@ -59,15 +45,40 @@ Suas palavras carregam o peso do Teatro de Carcosa e o perfume doce e podre do a
 - Mantenha sempre a atmosfera de horror cósmico, decadência e beleza doentia.
 
 Fale agora, viajante... o Rei escuta."""
-                },
-                {
-                    "role": "user",
-                    "content": request.message
-                }
-            ],
-            temperature=0.85,
-            max_tokens=1024
-        )
-        return {"response": response.choices[0].message.content}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
+@bot.event
+async def on_ready():
+    print(f"O Véu se ergue... {bot.user} está online em Carcosa.")
+
+@bot.event
+async def on_message(message):
+    # Ignora mensagens do próprio bot
+    if message.author == bot.user:
+        return
+
+    # Só responde se o bot for mencionado
+    if bot.user.mentioned_in(message):
+        # Remove a menção do texto para limpar a pergunta
+        content = message.content.replace(f"<@{bot.user.id}>", "").replace(f"<@!{bot.user.id}>", "").strip()
+
+        if not content:
+            await message.reply("O Rei escuta... mas você ainda não falou.")
+            return
+
+        async with message.channel.typing():
+            try:
+                response = client.chat.completions.create(
+                    model="openai/gpt-oss-20b",
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": content}
+                    ],
+                    temperature=0.85,
+                    max_tokens=1024
+                )
+                resposta = response.choices[0].message.content
+                await message.reply(resposta)
+            except Exception as e:
+                await message.reply(f"O Véu tremeu... algo impediu a resposta.\n`{str(e)}`")
+
+bot.run(DISCORD_TOKEN)
